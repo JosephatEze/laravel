@@ -1,20 +1,18 @@
 //WITH AWS ECR
 pipeline {
-
-       agent {
-            docker { image 'php:7.4.33-apache' }
-       }
-       // agent any
-        options {
-            skipDefaultCheckout true
-            disableConcurrentBuilds()
-        }
-        environment {
-            ecrRepository = "004510841606.dkr.ecr.us-east-1.amazonaws.com/php-app"
-            NAME = "php-app"
-        }
-        
-        stages{
+    agent {
+        docker { image 'php:7.4.33-apache' }
+    }
+    // agent any
+    options {
+        skipDefaultCheckout true
+        disableConcurrentBuilds()
+    }
+    environment {
+        ecrRepository = "004510841606.dkr.ecr.us-east-1.amazonaws.com/php-app"
+        NAME = "php-app"
+    }    
+    stages{
         stage('checkout') {
             steps {
                git branch: 'main', credentialsId: 'github_private_key', url: 'https://github.com/JosephatEze/php.git'
@@ -23,10 +21,6 @@ pipeline {
         stage('Install Composer') {
             steps {
                 sh 'composer install' //--ignore-platform-req=ext-mbstring --ignore-platform-req=ext-dom'
-                //sh 'composer update'
-                //sh 'sudo apt-get install php-cli'
-                //sh 'sudo apt-get install phpunit'
-                //sh  'sudo apt-get install php-xml'
             }
         }
         stage("PHPLint") {
@@ -65,13 +59,38 @@ pipeline {
                 sh 'aws eks --region us-east-1 update-kubeconfig --name <eks-cluster-name>'
                 //using helm chart to deploy
                 sh 'cd k8s/helm'
-                sh 'helm install <release-name> <./chart-name>'
+                sh 'helm upgrade --atomic --install --cleanup-on-fail -n default <release-name> <./chart-name>'
                 //using deployment files
                 sh 'cd k8s/deployment-file'
                 sh ' kubectl apply -f ~/k8s/templates/customer-service-deploy.yml'
                 //sh 'helm install [app-name] [chart]'
             }
+        //deploying with kubeconfig stored as credential secret file    
+        //steps {   
+            //script {
+               // withKubeConfig([credentialsId: 'K8S', serverUrl: '']) {
+               // sh ('kubectl apply -f  eks-deploy-k8s.yaml')
+               // }
+            //}
+       }
+    }
+    post{
+        always{
+            script{
+                RESULT=(currentBuild.result == null ? "SUCCESSFUL" : currentBuild.result)
+            }
         }
-
+        success{
+            script{
+                println "Success"
+                mail bcc: 'josephat@getreliancehealth.com', body: "*BUILD SUCCESSFUL*\n*JOB:* ${env.JOB_NAME}\n*BUILD ID:* <${env.BUILD_URL}|[${env.BUILD_NUMBER}]>\n*SOURCE_BRANCH:* ${params.SOURCE_BRANCH}\n*COMMIT_HASH:* <${GIT_URL_REPO}/commit/${GIT_HASH_RED}|[${GIT_HASH_RED}]>\n*COMMIT MESSAGE:* ${GIT_COMMIT_MSG}\n*ENVIRONMENT:* ${CLUSTER_NAME} - ${REGION}", cc: 'hakeem@getreliancehealth.com', from: '', replyTo: '', subject: 'JENKIN JOB', to: 'marcus@getreliancehealth.com'
+            }
+        }
+        failure{
+            script{
+                println "Failure"
+                mail bcc: 'josephat@getreliancehealth.com', body: "*BUILD FAILED*\n*JOB:* ${env.JOB_NAME}\n*BUILD ID:* <${env.BUILD_URL}|[${env.BUILD_NUMBER}]>\n*SOURCE_BRANCH:* ${params.SOURCE_BRANCH}\n*COMMIT_HASH:* <${GIT_URL_REPO}/commit/${GIT_HASH_RED}|[${GIT_HASH_RED}]>\n*COMMIT MESSAGE:* ${GIT_COMMIT_MSG}\n*ENVIRONMENT:* ${CLUSTER_NAME} - ${REGION}", cc: 'hakeem@getreliancehealth.com', from: '', replyTo: '', subject: 'JENKIN JOB', to: 'marcus@getreliancehealth.com'  
+            }
+        }
     }
 }

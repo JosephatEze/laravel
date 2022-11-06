@@ -1,0 +1,101 @@
+//WITH DOCKER HUB
+pipeline {
+    agent {
+    docker { image 'php:7.4.33-apache' }
+    }
+    // agent any
+    options {
+        disableConcurrentBuilds()
+        skipDefaultCheckout true
+    }
+    environment {
+        docker_registry= 'josephat'
+        NAME = "php-app"
+    } 
+    stages{
+    stage('checkout') {
+        steps {
+            git branch: 'main', credentialsId: 'github_private_key', url: 'https://github.com/JosephatEze/php.git'
+        }
+    }
+    stage('Install Composer') {
+        steps {
+            sh 'composer install' //--ignore-platform-req=ext-mbstring --ignore-platform-req=ext-dom'
+            //sh 'composer update'
+            //sh 'sudo apt-get install php-cli'
+            //sh 'sudo apt-get install phpunit'
+            //sh  'sudo apt-get install php-xml'
+        }
+    }
+    stage("PHPLint") {
+        steps {
+            sh 'find app -name "*.php" -print0 | xargs -0 -n1 php -l'
+        }
+    }
+    stage("PHPUnit") {
+        steps {
+            sh 'vendor/phpunit/phpunit/phpunit --bootstrap build/bootstrap.php --configuration phpunit-coverage.xml'
+            //sh './vendor/bin/phpunit --bootstrap ./vendor/autoload.php ./tests/quotetest.php'
+        }
+    }
+    stage('Build docker image'){
+        steps{
+            sh "docker build -t ${NAME} ."
+        }
+    }
+    stage('Push image to docker Hub'){
+        steps{
+            script{
+                withCredentials([usernamePassword(credentialsId: 'docker-login', passwordVariable: 'dockerhubpwd', usernameVariable: 'docker-hub-username')]) {
+                sh "docker login -u ${docker-hub-username} -p ${dockerhubpwd}"
+                sh "docker push ${docker_registry}/${NAME}:${BUILD_NUMBER}"
+                }  
+            }
+        }
+    }
+    stage('deploy app') {
+        when {
+            expression {
+                currentBuild.result == null || currentBuild.result == 'SUCCESS' 
+            }
+        }
+        steps {
+            sh 'aws eks --region us-east-1 update-kubeconfig --name <eks-cluster-name>'
+            //using helm chart to deploy
+            sh 'cd k8s/helm'
+            sh 'helm upgrade --atomic --cleanup-on-fail --install --n default <release-name> <./chart-name>'
+            //using deployment files
+            sh 'cd k8s/deployment-file'
+            sh ' kubectl apply -f ~/k8s/templates/customer-service-deploy.yml'
+            //sh 'helm install [app-name] [chart]'
+            }
+        //deploying with kubeconfig stored as credential secret file 
+        //steps {   
+           // script {
+               // withKubeConfig([credentialsId: 'K8S', serverUrl: '']) {
+                //sh ('kubectl apply -f  eks-deploy-k8s.yaml')
+                  //  }
+               // }
+           // }
+        }
+    }
+    post{
+        always{
+            script{
+                RESULT=(currentBuild.result == null ? "SUCCESSFUL" : currentBuild.result)
+                }
+        }
+        success{
+            script{
+                println "Success"
+                mail bcc: 'josephat@getreliancehealth.com', body: "*BUILD SUCCESSFUL*\n*JOB:* ${env.JOB_NAME}\n*BUILD ID:* <${env.BUILD_URL}|[${env.BUILD_NUMBER}]>\n*SOURCE_BRANCH:* ${params.SOURCE_BRANCH}\n*COMMIT_HASH:* <${GIT_URL_REPO}/commit/${GIT_HASH_RED}|[${GIT_HASH_RED}]>\n*COMMIT MESSAGE:* ${GIT_COMMIT_MSG}\n*ENVIRONMENT:* ${CLUSTER_NAME} - ${REGION}", cc: 'hakeem@getreliancehealth.com', from: '', replyTo: '', subject: 'JENKIN JOB', to: 'marcus@getreliancehealth.com'
+            }
+        }
+        failure{
+            script{
+                println "Failure"
+                mail bcc: 'josephat@getreliancehealth.com', body: "*BUILD FAILED*\n*JOB:* ${env.JOB_NAME}\n*BUILD ID:* <${env.BUILD_URL}|[${env.BUILD_NUMBER}]>\n*SOURCE_BRANCH:* ${params.SOURCE_BRANCH}\n*COMMIT_HASH:* <${GIT_URL_REPO}/commit/${GIT_HASH_RED}|[${GIT_HASH_RED}]>\n*COMMIT MESSAGE:* ${GIT_COMMIT_MSG}\n*ENVIRONMENT:* ${CLUSTER_NAME} - ${REGION}", cc: 'hakeem@getreliancehealth.com', from: '', replyTo: '', subject: 'JENKIN JOB', to: 'marcus@getreliancehealth.com'
+            }
+        }
+    }
+}
