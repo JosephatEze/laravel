@@ -1,7 +1,7 @@
 //WITH AWS ECR
 pipeline {
     agent {
-        docker { image 'php:7.4.33-apache' }
+        docker { image 'josephat/php8-agent'} //'php:7.4.33-apache' }
     }
     // agent any
     options {
